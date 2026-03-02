@@ -1,0 +1,154 @@
+README.txt
+miRNA Expression & Survival Pipeline (R) — PV / ET / PMF / Controls
+================================================================================
+
+Purpose
+-------
+This folder contains a fully reproducible R pipeline for:
+1) miRNA relative expression analyses (MeanDCq) for miR-125b-5p and miR-223-3p
+   across patients vs controls and within MPN subtypes (PV, ET, PMF),
+   including stratifications by sex, age categories, mutation status,
+   and multiple clinical/treatment covariates.
+2) Survival analyses: Kaplan–Meier curves (PV/ET/PMF), log-rank test, Cox models
+   (univariable and multivariable), proportional hazards diagnostics,
+   and machine learning survival models (LASSO Cox, Random Survival Forest).
+
+Input files
+-----------
+Place these Excel files in the same directory as run_pipeline.R (unless you edit PATH in R/01_config.R):
+
+- SMPC.xlsx
+- miRNA_0.xlsx
+
+Notes:
+- SMPC.xlsx is expected to contain at least one clinical sheet; the pipeline tries to load:
+  (a) "SMPC" as the main sheet if present, otherwise the first sheet.
+  (b) the second sheet as an miRNA sheet if needed.
+- miRNA_0.xlsx is assumed to contain one sheet.
+
+If column names differ from those in the code, update the mapping in: R/01_config.R.
+
+
+Project structure
+-----------------
+run_pipeline.R                      # Main runner (sources all modules and runs everything)
+R/01_config.R                       # Packages, PATH settings, and column mapping (EDIT HERE if needed)
+R/02_io.R                           # Excel input helpers
+R/03_preprocess.R                   # Join + recoding + derived variables (age groups, thresholds, mutations)
+R/04_mirna_stats.R                  # Expression analyses (tests, summaries, boxplots)
+R/05_survival.R                     # KM, log-rank, Cox models, PH tests, forest plots, tables
+R/06_penalized_cox.R                # Penalized Cox (glmnet LASSO) + cross-validation
+R/07_rsf.R                          # Random Survival Forest (randomForestSRC) + variable importance
+R/08_reporting.R                    # Collects and exports master tables
+
+OUTPUT/                              # Auto-generated at runtime
+OUTPUT/figures/                      # PNG figures (boxplots, KM plots, forest plots, RSF importance plot)
+OUTPUT/tables/                       # XLSX tables (“publication-ready” outputs, MASTER workbook)
+OUTPUT/models/                       # Reserved for model objects if needed later
+
+
+How to run
+----------
+Option A (recommended):
+1) Open R / RStudio
+2) Set working directory to this folder
+3) Run:
+   source("run_pipeline.R")
+
+Option B (manual, not recommended):
+Source each module in correct order (01 -> 08), then run the main functions.
+
+
+Required packages
+-----------------
+The pipeline uses the following packages:
+
+readxl, dplyr, tidyr, stringr, ggplot2, openxlsx,
+survival, survminer, glmnet, randomForestSRC, broom, forcats
+
+Install (once):
+install.packages(c(
+  "readxl","dplyr","tidyr","stringr","ggplot2","openxlsx",
+  "survival","survminer","glmnet","randomForestSRC","broom","forcats"
+))
+
+
+Key conventions / assumptions
+-----------------------------
+1) Diagnosis values:
+   Expected: "Control", "PV", "ET", "PMF"
+   (If your data uses different labels, adjust DIAG_LEVELS in R/01_config.R.)
+
+2) MeanDCq interpretation:
+   MeanDCq is an inverse-scale measure: lower MeanDCq typically implies higher relative expression.
+   All plots/tables are produced on the MeanDCq scale exactly as supplied in the dataset.
+
+3) Survival time:
+   The pipeline expects overall survival time in months (OS_months by default) and an event indicator
+   (Event by default: 1 = death/event, 0 = censored).
+   If time contains 0 or negative values, the pipeline replaces them with a small epsilon (0.001)
+   because glmnet Cox does not accept non-positive times.
+
+4) Mutation status:
+   JAK2 / CALR / MPL are recoded robustly to binary (0/1) using common encodings
+   (e.g., Positive/Negative, Yes/No, 1/0). If your encoding is unusual, edit as_binary01()
+   in R/03_preprocess.R.
+
+5) Random Survival Forest:
+   randomForestSRC fails if predictors are character columns.
+   The pipeline converts character predictors to factors before model fitting.
+
+6) Statistical tests for 2-group expression comparisons:
+   The code selects t-test when both groups pass a basic normality check (Shapiro) and sample size
+   is adequate; otherwise it defaults to Mann–Whitney (Wilcoxon rank-sum).
+
+
+Outputs you should expect
+-------------------------
+Figures (PNG):
+- Boxplots for key contrasts (patients vs controls; mutation vs triple-negative; PV/ET/PMF etc.)
+- Kaplan–Meier plots (PV, ET, PMF separately and combined)
+- Cox forest plots (optimized model and multivariable model)
+- Random Survival Forest variable importance plot
+
+Tables (XLSX):
+- expression_suite_tables.xlsx                     (summaries + p-values across expression analyses)
+- cox_publication_table_Diagnosis_Age_JAK2.xlsx     (HR, 95% CI, p)
+- cox_univariable_publication_table.xlsx            (HR, 95% CI, p for each variable)
+- cox_multivariable_publication_table.xlsx          (HR, 95% CI, p for combined model)
+- cox_PH_test_Diagnosis_Age_JAK2.xlsx               (PH assumption test output)
+- lasso_cox_selected_variables.xlsx                 (variables selected at lambda.1se and lambda.min)
+- rsf_variable_importance.xlsx                      (RSF importance values)
+- MASTER_results.xlsx                               (single workbook collecting key results)
+
+
+What to edit if something doesn’t match your Excel
+--------------------------------------------------
+1) Column names:
+   Open R/01_config.R and update CFG entries:
+   - diagnosis_col, sex_col, age_col
+   - mir_125_col, mir_223_col
+   - time_col, event_col
+   - jak2_col, calr_col, mpl_col
+   - lab columns (hgb_col, hct_col, plt_col, wbc_col, ldh_col)
+   - clinical/treatment covariates (MajorTrombosis, Splenomegaly, etc.)
+
+2) Join key:
+   The pipeline joins SMPC and miRNA_0 by CFG$id_col.
+   If your common identifier is different (e.g., SampleName), set id_col accordingly.
+
+3) Units:
+   WBC threshold is coded as > 11 × 10^9/L.
+   If your WBC is stored in different units (e.g., plain numeric without 10^9 scaling),
+   adjust the threshold in R/03_preprocess.R.
+
+
+Contact / notes
+---------------
+If you add new predictors or new miRNAs, the cleanest approach is:
+- Add mappings in R/01_config.R
+- Add derived variables in R/03_preprocess.R (if needed)
+- Extend analysis loops in R/04_mirna_stats.R / R/05_survival.R accordingly.
+
+End of README
+================================================================================
